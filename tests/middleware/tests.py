@@ -828,3 +828,26 @@ class ETagGZipMiddlewareTest(SimpleTestCase):
         nogzip_etag = response.get('ETag')
 
         self.assertNotEqual(gzip_etag, nogzip_etag)
+
+    def test_request_response_etags_match(self):
+        """
+        ETag modifications to response are stripped from request
+        """
+        request = self.rf.get('/',
+                              HTTP_ACCEPT_ENCODING='gzip, deflate')
+        original_response = CommonMiddleware().process_response(request, HttpResponse(self.compressible_string))
+        original_response_etag = original_response.get('ETag')
+
+        gzip_response = GZipMiddleware().process_response(request, original_response)
+        gzip_response_etag = gzip_response.get('ETag')
+
+        conditional_request = self.rf.get('/',
+                                          HTTP_ACCEPT_ENCODING='gzip, deflate',
+                                          HTTP_IF_NONE_MATCH=gzip_response_etag)
+        try:
+            GZipMiddleware().process_request(conditional_request)
+        except AttributeError:  # if the middleware doesn't have process_request()
+            pass
+        conditional_request_etag = conditional_request.META.get('HTTP_IF_NONE_MATCH')
+
+        self.assertEqual(original_response_etag, conditional_request_etag)

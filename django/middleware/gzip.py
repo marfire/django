@@ -6,6 +6,9 @@ from django.utils.text import compress_sequence, compress_string
 
 re_accepts_gzip = re.compile(r'\bgzip\b')
 
+# \b instead of " allows for the use of other such ETag markers
+re_gzip_etag = re.compile(r';gzip\b')
+
 
 class GZipMiddleware(MiddlewareMixin):
     """
@@ -13,6 +16,11 @@ class GZipMiddleware(MiddlewareMixin):
     It sets the Vary header accordingly, so that caches will base their storage
     on the Accept-Encoding header.
     """
+
+    def process_request(self, request):
+        self.strip_etag(request, 'HTTP_IF_NONE_MATCH')
+        self.strip_etag(request, 'HTTP_IF_MATCH')
+
     def process_response(self, request, response):
         # It's not worth attempting to compress really short responses.
         if not response.streaming and len(response.content) < 200:
@@ -46,3 +54,9 @@ class GZipMiddleware(MiddlewareMixin):
         response['Content-Encoding'] = 'gzip'
 
         return response
+
+    def strip_etag(self, request, header):
+        etags = request.META.get(header)
+        if etags:
+            plain_etags = re_gzip_etag.sub('', etags)  # strip the ;gzip from any ETags
+            request.META[header] = plain_etags
