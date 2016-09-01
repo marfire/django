@@ -19,7 +19,7 @@ from django.utils.six.moves.urllib.parse import (
     urlparse,
 )
 
-ETAG_MATCH = re.compile(r'(?:W/)?"((?:\\.|[^"])*)"')
+ETAG_MATCH = re.compile(r'\A((?:W/)?"[^"]*")\Z')  # based on RFC 7232, Appendix C
 
 MONTHS = 'jan feb mar apr may jun jul aug sep oct nov dec'.split()
 __D = r'(?P<day>\d{2})'
@@ -90,7 +90,7 @@ def urlencode(query, doseq=0):
         query = query.items()
     return original_urlencode(
         [(force_str(k),
-         [force_str(i) for i in v] if isinstance(v, (list, tuple)) else force_str(v))
+          [force_str(i) for i in v] if isinstance(v, (list, tuple)) else force_str(v))
             for k, v in query],
         doseq)
 
@@ -232,30 +232,31 @@ def urlsafe_base64_decode(s):
 
 def parse_etags(etag_str):
     """
-    Parses a string with one or several etags passed in If-None-Match and
-    If-Match headers by the rules in RFC 2616. Returns a list of etags
-    without surrounding double quotes (") and unescaped from \<CHAR>.
+    Parses a string of ETags given in an If-None-Match or If-Match header as
+    defined by RFC 7232. Returns a list of quoted ETags, or ['*'] if all ETags
+    should be matched.
     """
-    etags = ETAG_MATCH.findall(etag_str)
-    if not etags:
-        # etag_str has wrong format, treat it as an opaque string then
-        return [etag_str]
-    etags = [e.encode('ascii').decode('unicode_escape') for e in etags]
-    return etags
+    if etag_str.strip() == '*':
+        return ['*']
+    else:
+        # This is just enough validation to prevent outdated RFC 2616 ETags
+        # from breaking things.
+        etag_matches = (ETAG_MATCH.match(etag.strip()) for etag in etag_str.split(","))
+        etags = [match.group(1) for match in etag_matches if match]
+
+        return etags
 
 
-def quote_etag(etag):
+def quote_etag(etag_str):
     """
-    Wraps a string in double quotes escaping contents as necessary.
+    If the provided string is already a quoted ETag, return it. Otherwise, wrap
+    the string in quotes, making it a strong ETag.
     """
-    return '"%s"' % etag.replace('\\', '\\\\').replace('"', '\\"')
-
-
-def unquote_etag(etag):
-    """
-    Unquote an ETag string; i.e. revert quote_etag().
-    """
-    return etag.strip('"').replace('\\"', '"').replace('\\\\', '\\') if etag else etag
+    if ETAG_MATCH.match(etag_str):
+        return etag_str
+    else:
+        # We don't validate etag_str.
+        return '"%s"' % etag_str
 
 
 def is_same_domain(host, pattern):
